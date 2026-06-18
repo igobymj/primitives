@@ -1,0 +1,14 @@
+{
+  "name": "primitives",
+  "version": "0.1.0",
+  "description": "A p5.js engine for tactile, primitive-based creatures.",
+  "main": "webserver.js",
+  "scripts": {
+    "start": "node webserver.js",
+    "dev": "node webserver.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.0"
+  }
+}
