@@ -1,4 +1,7 @@
 import GameSession from "./engine/GameSession.js";
+import Creature from "./game/Creature.js";
+import CreatureManager from "./game/CreatureManager.js";
+import Editor from "./editor/Editor.js";
 
 // Resume Tone.js AudioContext on first user interaction (browser autoplay policy)
 function resumeAudioContext() {
@@ -10,6 +13,27 @@ document.addEventListener('click', resumeAudioContext);
 document.addEventListener('keydown', resumeAudioContext);
 
 const gameSession = new GameSession();
+gameSession.backgroundColor = '#f3ecdc'; // warm cream
+
+const creatureManager = new CreatureManager(gameSession);
+gameSession.gameLoop.addUpdateSystem('creatures', creatureManager, 100);
+gameSession.gameLoop.addRenderSystem('creatures', creatureManager, 100);
+
+const PANEL_WIDTH = 260;
+
+function createCreature() {
+  const cx = (gameSession.canvasWidth - PANEL_WIDTH) / 2 + (Math.random() - 0.5) * 80;
+  const cy = gameSession.canvasHeight / 2 + (Math.random() - 0.5) * 80;
+  const creature = new Creature(gameSession, cx, cy, {
+    bodyRadius: 24,
+    arms: [],
+    jitter: 0,
+  });
+  creatureManager.add(creature);
+  creatureManager.select(creature);
+}
+
+const editor = new Editor(creatureManager, document.getElementById('editor-panel'), createCreature);
 
 const sketch = function (p) {
 
@@ -41,6 +65,20 @@ const sketch = function (p) {
       p.fill(gameSession.flashColor);
       p.rect(0, 0, gameSession.canvasWidth, gameSession.canvasHeight);
     }
+  }
+
+  p.mousePressed = function () {
+    // Ignore clicks on the editor panel (p5 mouse events fire window-wide)
+    if (p.mouseX > p.windowWidth - PANEL_WIDTH) return;
+    creatureManager.mousePressed(p.mouseX, p.mouseY);
+  }
+
+  p.mouseDragged = function () {
+    creatureManager.mouseDragged(p.mouseX, p.mouseY);
+  }
+
+  p.mouseReleased = function () {
+    creatureManager.mouseReleased();
   }
 
   p.keyPressed = function () {

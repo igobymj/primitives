@@ -11,3 +11,112 @@ html, body {
   width: 100vw;
   height: 100vh;
 }
+
+#editor-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 260px;
+  height: 100vh;
+  padding: 18px 18px 24px;
+  box-sizing: border-box;
+  background: rgba(20, 20, 24, 0.92);
+  color: #e8e6e0;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+#editor-panel h2 {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin: 0 0 16px;
+  color: #c8c4b6;
+}
+
+#editor-panel .hint {
+  color: #8a867a;
+  margin: 8px 0;
+}
+
+#editor-panel label {
+  display: block;
+  margin: 0 0 14px;
+}
+
+#editor-panel label.slider {
+  margin-bottom: 18px;
+}
+
+#editor-panel label.slider .row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  color: #b0ad9f;
+}
+
+#editor-panel label.slider .val {
+  color: #e8e6e0;
+  font-variant-numeric: tabular-nums;
+}
+
+#editor-panel input[type="range"] {
+  width: 100%;
+  accent-color: #6aa8d8;
+}
+
+#editor-panel label.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #b0ad9f;
+}
+
+#editor-panel button {
+  display: block;
+  width: 100%;
+  margin: 6px 0 14px;
+  padding: 8px 12px;
+  background: #2a2a30;
+  color: #e8e6e0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+#editor-panel button:hover {
+  background: #353540;
+}
+
+#editor-panel button.primary {
+  background: #3a5a78;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+#editor-panel button.primary:hover {
+  background: #466a8a;
+}
+
+#editor-panel button.danger {
+  background: #5a2a2a;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+#editor-panel button.danger:hover {
+  background: #6e3434;
+}
+
+#editor-panel h3 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 20px 0 10px;
+  color: #8a867a;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 16px;
+}
