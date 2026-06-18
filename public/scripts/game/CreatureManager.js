@@ -32,17 +32,17 @@ export default class CreatureManager {
         this.draggedEndpoint = null;
         this.NUDGE_SCALE = 4;
         this.ENDPOINT_HIT_RADIUS = 10;
+    }
 
-        // Escape: cancel a pending line first; otherwise deselect the line
-        // (creature stays selected).
-        window.addEventListener('keydown', (e) => {
-            if (e.key !== 'Escape') return;
-            if (this.pendingLine) {
-                this.pendingLine = null;
-            } else if (this.selectedLine) {
-                this.selectLine(null);
-            }
-        });
+    // Key dispatch from InputManager. Escape: cancel a pending line first;
+    // otherwise deselect the line (creature stays selected).
+    keyPressed(key) {
+        if (key !== 'Escape') return;
+        if (this.pendingLine) {
+            this.pendingLine = null;
+        } else if (this.selectedLine) {
+            this.selectLine(null);
+        }
     }
 
     add(creature) {
@@ -227,6 +227,17 @@ export default class CreatureManager {
 
     update() {
         const p = this.gameSession.p5;
+
+        // WASD moves the selected creature.
+        if (this.selected) {
+            const mv = this.gameSession.inputManager.inputObject.movement;
+            if (mv && (mv.x !== 0 || mv.y !== 0)) {
+                const speed = 4;
+                this.selected.position.x += mv.x * speed;
+                this.selected.position.y += mv.y * speed;
+            }
+        }
+
         const mx = p.mouseX;
         const my = p.mouseY;
         for (const c of this.creatures) {

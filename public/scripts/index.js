@@ -16,8 +16,14 @@ const gameSession = new GameSession();
 gameSession.backgroundColor = '#f3ecdc'; // warm cream
 
 const creatureManager = new CreatureManager(gameSession);
+// InputManager polls held keys (WASD) each frame; runs before consumers.
+gameSession.gameLoop.addUpdateSystem('input', gameSession.inputManager, 0);
 gameSession.gameLoop.addUpdateSystem('creatures', creatureManager, 100);
 gameSession.gameLoop.addRenderSystem('creatures', creatureManager, 100);
+
+// Route all mouse + key input through the engine's InputManager.
+gameSession.inputManager.addMouseHandler(creatureManager);
+gameSession.inputManager.addKeyHandler((key) => creatureManager.keyPressed(key));
 
 const PANEL_WIDTH = 260;
 
@@ -70,15 +76,15 @@ const sketch = function (p) {
   p.mousePressed = function () {
     // Ignore clicks on the editor panel (p5 mouse events fire window-wide)
     if (p.mouseX > p.windowWidth - PANEL_WIDTH) return;
-    creatureManager.mousePressed(p.mouseX, p.mouseY);
+    gameSession.inputManager.mousePressed(p.mouseX, p.mouseY);
   }
 
   p.mouseDragged = function () {
-    creatureManager.mouseDragged(p.mouseX, p.mouseY);
+    gameSession.inputManager.mouseDragged(p.mouseX, p.mouseY);
   }
 
   p.mouseReleased = function () {
-    creatureManager.mouseReleased();
+    gameSession.inputManager.mouseReleased();
   }
 
   p.keyPressed = function () {

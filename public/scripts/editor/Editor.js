@@ -77,6 +77,11 @@ export default class Editor {
                 animate jitter
             </label>
 
+            <label class="checkbox">
+                <input type="checkbox" data-ctrl="smooth" ${c.smoothJitter ? 'checked' : ''}>
+                smooth jitter
+            </label>
+
             <label class="slider">
                 <span class="row"><span>interval</span><span class="val" data-val="interval">${interval}ms</span></span>
                 <input type="range" min="40" max="500" step="10" value="${interval}" data-ctrl="interval">
@@ -144,6 +149,10 @@ export default class Editor {
         $('[data-ctrl="animate"]').addEventListener('change', (e) => {
             const interval = parseFloat($('[data-ctrl="interval"]').value);
             c.jitterAnimateInterval = e.target.checked ? interval : 0;
+        });
+
+        $('[data-ctrl="smooth"]').addEventListener('change', (e) => {
+            c.smoothJitter = e.target.checked;
         });
 
         $('[data-ctrl="interval"]').addEventListener('input', (e) => {

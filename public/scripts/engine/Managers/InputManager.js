@@ -1,9 +1,16 @@
 /*
  * InputManager — base class
  *
- * Aggregates per-frame held-key state into `inputObject` and dispatches
- * one-shot keypresses through `keyInput()`. Game-specific bindings belong
- * in a subclass that overrides `update()` and `keyInput()`.
+ * Central dispatch for mouse and key input. Components (managers, tools)
+ * register as handlers; the InputManager forwards events from p5 to all
+ * registered handlers in registration order.
+ *
+ * Mouse handlers are objects with any subset of {mousePressed, mouseDragged,
+ * mouseReleased}. Key handlers are functions (key) => void invoked on
+ * one-shot keypresses (called from p5's keyPressed via `keyInput`).
+ *
+ * Override `update()` in a subclass to poll held-key state via
+ * this.gameSession.p5.keyIsDown(...).
  */
 
 import Manager from "./Manager.js";
@@ -20,6 +27,8 @@ export default class InputManager extends Manager {
         InputManager.__instance = this;
 
         this.__inputObject = {};
+        this.__mouseHandlers = [];
+        this.__keyHandlers = [];
 
         if (this.gameSession.verbose === true) {
             console.log("input manager created successfully");
@@ -27,11 +36,50 @@ export default class InputManager extends Manager {
     }
 
     update() {
-        // Override in a subclass to read held keys via this.gameSession.p5.keyIsDown(...)
+        // Poll held keys into inputObject so consumers can read each frame.
+        // Movement is a unit-ish vector in canvas coordinates: +x right, +y down.
+        const p = this.gameSession.p5;
+        this.__inputObject.movement = {
+            x: (p.keyIsDown(68) ? 1 : 0) - (p.keyIsDown(65) ? 1 : 0), // D - A
+            y: (p.keyIsDown(83) ? 1 : 0) - (p.keyIsDown(87) ? 1 : 0), // S - W
+        };
     }
 
-    keyInput(keyInputValue) {
-        // Override in a subclass to handle one-shot keypresses.
+    // Registration
+
+    addMouseHandler(handler) {
+        this.__mouseHandlers.push(handler);
+    }
+
+    addKeyHandler(handler) {
+        this.__keyHandlers.push(handler);
+    }
+
+    // Dispatch — call from p5's mouse/key callbacks.
+
+    mousePressed(x, y) {
+        for (const h of this.__mouseHandlers) {
+            if (h.mousePressed) h.mousePressed(x, y);
+        }
+    }
+
+    mouseDragged(x, y) {
+        for (const h of this.__mouseHandlers) {
+            if (h.mouseDragged) h.mouseDragged(x, y);
+        }
+    }
+
+    mouseReleased() {
+        for (const h of this.__mouseHandlers) {
+            if (h.mouseReleased) h.mouseReleased();
+        }
+    }
+
+    // p5's one-shot key callback routes here.
+    keyInput(key) {
+        for (const h of this.__keyHandlers) {
+            h(key);
+        }
     }
 
     get inputObject() {

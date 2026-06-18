@@ -62,17 +62,24 @@ export default class Creature extends GameObject {
         this.__selected = false;
 
         // User-drawn lines in local space:
-        //   [{ id, p1: {x,y}, p2: {x,y}, strokeWeight }]
+        //   [{ id, p1, p2, strokeWeight, penEffect, smudgePrev, smudgeNext }]
         this.__lines = [];
         this.__lineIdCounter = 0;
         this.__selectedLine = null;
 
-        // Animated-jitter state (ms between rerolls; 0 disables)
+        // Animated-jitter state. interval=0 disables. When smoothJitter is
+        // off, each tick snaps to a new random state (boiling). When on, the
+        // creature drifts linearly from prev → next across the interval.
         this.__jitterAnimateInterval = 0;
-        this.__jitterLastReroll = performance.now();
+        this.__smoothJitter = false;
+        this.__animT0 = performance.now();
     }
 
     addLine(p1, p2) {
+        // Initialize prev = next so a brand new line doesn't animate yet; the
+        // next animation tick will set prev = current next and pick a new next,
+        // and from then on it drifts/snaps with the rest of the creature.
+        const smudge = this._generateSmudgeVariance();
         const line = {
             id: ++this.__lineIdCounter,
             p1: { x: p1.x, y: p1.y },
@@ -81,7 +88,8 @@ export default class Creature extends GameObject {
             // Per-line fountain-pen intensity. 0 = pure crisp line; 1 = default;
             // 2 = exaggerated. Set independently per line via the editor.
             penEffect: 1.0,
-            smudge: this._generateSmudgeVariance(),
+            smudgePrev: smudge,
+            smudgeNext: smudge,
         };
         this.__lines.push(line);
         return line;
@@ -197,16 +205,85 @@ export default class Creature extends GameObject {
         ];
     }
 
-    // Re-roll all jitter-driven random offsets (body verts + per-tick wobble)
-    // using the current jitter amount. Also re-rolls per-segment body
-    // stroke-weight noise used by the pen effect on the body outline.
+    // Snap body + arms to a freshly generated state. Both prev and next are
+    // set to the same state, so animation has no transition until the next
+    // tick advances prev → next.
     _bake() {
         this.__arms = this.__armSpecs.map((arm) => this._materializeArm(arm));
-        this.__bodyVertices = this._materializeBody(this.__bodyRadius);
-        this.__bodyStrokeNoise = Array.from(
-            { length: this.__bodyVertices.length },
+        const newState = this._generateBodyState();
+        this.__bodyStatePrev = newState;
+        this.__bodyState = newState;
+        this.__animT0 = performance.now();
+    }
+
+    _generateBodyState() {
+        const vertices = this._materializeBody(this.__bodyRadius);
+        const strokeNoise = Array.from(
+            { length: vertices.length },
             () => Math.random() * 2 - 1
         );
+        return { vertices, strokeNoise };
+    }
+
+    // Advance the animation by one tick if the interval has elapsed. Sets
+    // prev = current next and picks a new next for body + each line; also
+    // re-rolls arms (snap only — arms don't interpolate).
+    _advanceAnim(now) {
+        const interval = this.__jitterAnimateInterval;
+        if (interval <= 0) return;
+        const elapsed = now - this.__animT0;
+        if (elapsed < interval) return;
+
+        this.__bodyStatePrev = this.__bodyState;
+        this.__bodyState = this._generateBodyState();
+        for (const ln of this.__lines) {
+            ln.smudgePrev = ln.smudgeNext;
+            ln.smudgeNext = this._generateSmudgeVariance();
+        }
+        // Arms snap with the cycle (no prev/next interpolation for ticks).
+        this.__arms = this.__armSpecs.map((arm) => this._materializeArm(arm));
+        this.__animT0 = now;
+    }
+
+    // 0..1 phase between prev and next, linear. Returns 1 when not animating
+    // or when smooth jitter is off (renderers use next state directly).
+    _currentPhase() {
+        const interval = this.__jitterAnimateInterval;
+        if (interval <= 0 || !this.__smoothJitter) return 1;
+        const elapsed = performance.now() - this.__animT0;
+        return Math.min(Math.max(elapsed / interval, 0), 1);
+    }
+
+    _lerp(a, b, t) { return a + (b - a) * t; }
+    _lerpArr(a, b, t) {
+        const out = new Array(a.length);
+        for (let i = 0; i < a.length; i++) out[i] = a[i] + (b[i] - a[i]) * t;
+        return out;
+    }
+    _lerpVerts(a, b, t) {
+        const out = new Array(a.length);
+        for (let i = 0; i < a.length; i++) {
+            out[i] = { x: a[i].x + (b[i].x - a[i].x) * t, y: a[i].y + (b[i].y - a[i].y) * t };
+        }
+        return out;
+    }
+    _lerpSmudge(a, b, t) {
+        if (a === b) return a;
+        return {
+            taperLenFactor:     this._lerp(a.taperLenFactor,     b.taperLenFactor,     t),
+            taperWidthFactor:   this._lerp(a.taperWidthFactor,   b.taperWidthFactor,   t),
+            taperSideBias:      this._lerp(a.taperSideBias,      b.taperSideBias,      t),
+            blobSizeFactor:     this._lerp(a.blobSizeFactor,     b.blobSizeFactor,     t),
+            blobOffsetPerp:     this._lerp(a.blobOffsetPerp,     b.blobOffsetPerp,     t),
+            blobStretch:        this._lerp(a.blobStretch,        b.blobStretch,        t),
+            blobRotation:       this._lerp(a.blobRotation,       b.blobRotation,       t),
+            p1TouchFactor:      this._lerp(a.p1TouchFactor,      b.p1TouchFactor,      t),
+            p1TouchOffsetPerp:  this._lerp(a.p1TouchOffsetPerp,  b.p1TouchOffsetPerp,  t),
+            haloFactor:         this._lerp(a.haloFactor,         b.haloFactor,         t),
+            haloOffsetPerp:     this._lerp(a.haloOffsetPerp,     b.haloOffsetPerp,     t),
+            strokeNoise:        this._lerpArr(a.strokeNoise, b.strokeNoise, t),
+            pathJitter:         this._lerpArr(a.pathJitter,  b.pathJitter,  t),
+        };
     }
 
     _materializeArm(arm) {
@@ -279,16 +356,21 @@ export default class Creature extends GameObject {
     get jitterAnimateInterval() { return this.__jitterAnimateInterval; }
     set jitterAnimateInterval(ms) {
         this.__jitterAnimateInterval = ms;
-        this.__jitterLastReroll = performance.now();
+        this.__animT0 = performance.now();
     }
 
-    // Re-roll all random offsets at the current jitter amount.
-    // Call periodically (e.g. every 80–150ms) for a "boiling" cartoon effect.
-    // Also re-rolls per-line smudge variance so lines animate with the rest.
+    get smoothJitter() { return this.__smoothJitter; }
+    set smoothJitter(v) { this.__smoothJitter = v; }
+
+    // Snap to a brand-new state for body, arms, and all line smudges. Resets
+    // the phase to 0 — useful as "force immediate randomize" while animation
+    // is on (drift starts from the new state).
     reroll() {
         this._bake();
         for (const ln of this.__lines) {
-            ln.smudge = this._generateSmudgeVariance();
+            const newSmudge = this._generateSmudgeVariance();
+            ln.smudgePrev = newSmudge;
+            ln.smudgeNext = newSmudge;
         }
     }
 
@@ -336,11 +418,7 @@ export default class Creature extends GameObject {
             this.__armStretch[i] += (this.__targetStretch[i] - this.__armStretch[i]) * lerpSpeed;
         }
         if (this.__jitterAnimateInterval > 0) {
-            const now = performance.now();
-            if (now - this.__jitterLastReroll >= this.__jitterAnimateInterval) {
-                this.reroll();
-                this.__jitterLastReroll = now;
-            }
+            this._advanceAnim(performance.now());
         }
     }
 
@@ -363,8 +441,12 @@ export default class Creature extends GameObject {
 
     _renderLines(p) {
         if (this.__lines.length === 0) return;
+        const phase = this._currentPhase();
         for (const ln of this.__lines) {
-            this._renderFountainPenLine(p, ln, ln === this.__selectedLine);
+            const smudge = (phase === 1 || ln.smudgePrev === ln.smudgeNext)
+                ? ln.smudgeNext
+                : this._lerpSmudge(ln.smudgePrev, ln.smudgeNext, phase);
+            this._renderFountainPenLine(p, ln, smudge, ln === this.__selectedLine);
         }
     }
 
@@ -380,10 +462,9 @@ export default class Creature extends GameObject {
      *   5. Pooled ink blob at p2 (lift point) and smaller touch at p1
      *   6. Selection endpoint dots (only if selected)
      */
-    _renderFountainPenLine(p, ln, isSelected) {
-        if (!ln.smudge) ln.smudge = this._generateSmudgeVariance(); // safety net
+    _renderFountainPenLine(p, ln, smudge, isSelected) {
         if (ln.penEffect == null) ln.penEffect = 1.0;                // safety net
-        const sm = ln.smudge;
+        const sm = smudge;
         const sw = ln.strokeWeight;
         // Halved internally so slider 1.00 → 0.5 of the prior effect.
         const pe = ln.penEffect * 0.5;
@@ -552,12 +633,19 @@ export default class Creature extends GameObject {
     }
 
     _renderBody(p) {
-        const verts = this.__bodyVertices;
+        const phase = this._currentPhase();
+        const prev = this.__bodyStatePrev;
+        const next = this.__bodyState;
+        const verts = (phase === 1 || prev === next)
+            ? next.vertices
+            : this._lerpVerts(prev.vertices, next.vertices, phase);
+        const noise = (phase === 1 || prev === next)
+            ? next.strokeNoise
+            : this._lerpArr(prev.strokeNoise, next.strokeNoise, phase);
         const n = verts.length;
         const sw = this.__strokeWeight;
         // Halved internally so slider 1.00 → 0.5 of the prior effect.
         const pe = this.__penEffect * 0.5;
-        const noise = this.__bodyStrokeNoise;
 
         // 1. Fill — single closed Catmull-Rom shape, no stroke.
         p.noStroke();
