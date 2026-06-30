@@ -152,7 +152,7 @@ const editor = new Editor(creatureManager, document.getElementById('editor-panel
 // so its initial UI reflects what's on disk. deepMerge in extend() means the
 // file overlays the in-code defaults — missing keys keep their defaults.
 try {
-  const res = await fetch('public/scripts/data/juice.json?t=' + Date.now());
+  const res = await fetch('public/scripts/data/juice.json');
   if (res.ok) {
     const data = await res.json();
     if (data && data.container) gameSession.juiceSettings.extend(data.container);
