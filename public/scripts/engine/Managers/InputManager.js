@@ -36,12 +36,18 @@ export default class InputManager extends Manager {
     }
 
     update() {
-        // Poll held keys into inputObject so consumers can read each frame.
-        // Movement is a unit-ish vector in canvas coordinates: +x right, +y down.
+        // Poll held keys into inputObject every frame.
         const p = this.gameSession.p5;
+
+        const RIGHT = p.keyIsDown(68) ? 1 : 0;
+        const LEFT = p.keyIsDown(65) ? 1 : 0;
+        const DOWN = p.keyIsDown(83) ? 1 : 0;
+        const UP = p.keyIsDown(87) ? 1 : 0;
+
+        // create positive or negative number depending on keys held down
         this.__inputObject.movement = {
-            x: (p.keyIsDown(68) ? 1 : 0) - (p.keyIsDown(65) ? 1 : 0), // D - A
-            y: (p.keyIsDown(83) ? 1 : 0) - (p.keyIsDown(87) ? 1 : 0), // S - W
+            x: RIGHT - LEFT,
+            y: DOWN - UP,
         };
     }
 

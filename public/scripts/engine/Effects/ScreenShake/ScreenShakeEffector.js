@@ -72,7 +72,8 @@ export default class ScreenShakeEffector {
     update(){
 
             // screen shake can either just end, or fade out (fading out amplitude). Fading usually looks better.
-            if( this.fade === true ) {
+            // `fade` is a string ('linear' | 'exponential') or falsy; truthy enables fading.
+            if( this.fade ) {
                 this.shakeFader();
             }
 

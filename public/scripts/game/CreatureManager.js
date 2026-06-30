@@ -14,6 +14,11 @@ export default class CreatureManager {
     constructor(gameSession) {
         this.gameSession = gameSession;
         this.creatures = [];
+        // 'editor' enables full editing (selection, line drawing, WASD nav).
+        // 'play' allows dragging; empty clicks spawn a creature via onSpawnRequest.
+        this.mode = 'editor';
+        // Optional (x, y) → creature factory invoked on play-mode empty clicks.
+        this.onSpawnRequest = null;
         this.dragged = null;
         this.dragOffsetX = 0;
         this.dragOffsetY = 0;
@@ -37,6 +42,7 @@ export default class CreatureManager {
     // Key dispatch from InputManager. Escape: cancel a pending line first;
     // otherwise deselect the line (creature stays selected).
     keyPressed(key) {
+        if (this.mode !== 'editor') return;
         if (key !== 'Escape') return;
         if (this.pendingLine) {
             this.pendingLine = null;
@@ -72,6 +78,22 @@ export default class CreatureManager {
     }
 
     mousePressed(x, y) {
+        // Play mode: clicking a creature kills it; clicking empty space spawns
+        // one (capped at a single creature in the world at a time).
+        if (this.mode !== 'editor') {
+            for (let i = this.creatures.length - 1; i >= 0; i--) {
+                const c = this.creatures[i];
+                if (c.containsPoint(x, y)) {
+                    this.creatures.splice(i, 1);
+                    return;
+                }
+            }
+            if (this.creatures.length === 0 && this.onSpawnRequest) {
+                this.onSpawnRequest(x, y);
+            }
+            return;
+        }
+
         // Priority 0: endpoint of the selected line → start a nudge drag.
         if (this.selected && this.selectedLine) {
             const ep = this._endpointAt(x, y);
@@ -228,13 +250,15 @@ export default class CreatureManager {
     update() {
         const p = this.gameSession.p5;
 
-        // WASD moves the selected creature.
-        if (this.selected) {
+        // WASD: in editor mode drives the selected creature; in play mode
+        // drives the single creature (play caps the world at one).
+        const driven = this.mode === 'editor' ? this.selected : this.creatures[0];
+        if (driven) {
             const mv = this.gameSession.inputManager.inputObject.movement;
             if (mv && (mv.x !== 0 || mv.y !== 0)) {
                 const speed = 4;
-                this.selected.position.x += mv.x * speed;
-                this.selected.position.y += mv.y * speed;
+                driven.position.x += mv.x * speed;
+                driven.position.y += mv.y * speed;
             }
         }
 
@@ -248,7 +272,7 @@ export default class CreatureManager {
 
     render() {
         for (const c of this.creatures) c.render();
-        this._renderPendingLine();
+        if (this.mode === 'editor') this._renderPendingLine();
     }
 
     _renderPendingLine() {

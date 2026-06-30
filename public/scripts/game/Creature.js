@@ -26,10 +26,13 @@
  */
 
 import GameObject from "../engine/GameObject.js";
+import { generateSmudgeVariance, renderFountainPenLine, DEFAULT_SEGMENTS, lerpSmudge } from "./fountainPen.js";
 
 // Per-feature base jitter amounts (all multiplied by the per-instance scalar).
-const BODY_JITTER = 2.0;        // wobble of body outline radius
-const TICK_RADIAL_JITTER = 1.5; // drift along arm direction
+// The body's smooth out-of-round comes from harmonic deformation; per-vertex
+// jitter (the old "twitchy" effect) layers on top via VERTEX_JITTER_SCALE.
+const VERTEX_JITTER_SCALE = 5.0; // ±2.5 * jitter px peak vertex bump
+const TICK_RADIAL_JITTER = 1.5;  // drift along arm direction
 const TICK_ANGLE_JITTER = 0.25; // radians off perpendicular
 const TICK_LENGTH_JITTER = 2.0;
 const TICK_OVERSHOOT = 1.0;     // extra at each end of a tick line
@@ -46,7 +49,14 @@ export default class Creature extends GameObject {
         this.__strokeWeight = params.strokeWeight ?? 2.2;
 
         this.__armSpecs = params.arms ?? this._defaultArms(bodyRadius);
-        this.__jitter = params.jitter ?? 1.0;
+        // Two complementary "wobble" channels:
+        //   __deformation — slow, smooth out-of-round shape from low harmonics
+        //                   (always visible; what a confident pen stroke gives).
+        //   __jitter      — fast per-vertex random offsets layered on top;
+        //                   used by the animation pipeline (e.g. food activation)
+        //                   to make the creature visibly twitch.
+        this.__deformation = params.deformation ?? 1.0;
+        this.__jitter = params.jitter ?? 0;
         // Per-creature pen effect — drives stroke-weight noise on the body
         // outline only (no blob or halo on the body). Lines have their own.
         this.__penEffect = params.penEffect ?? 1.0;
@@ -79,7 +89,7 @@ export default class Creature extends GameObject {
         // Initialize prev = next so a brand new line doesn't animate yet; the
         // next animation tick will set prev = current next and pick a new next,
         // and from then on it drifts/snaps with the rest of the creature.
-        const smudge = this._generateSmudgeVariance();
+        const smudge = generateSmudgeVariance();
         const line = {
             id: ++this.__lineIdCounter,
             p1: { x: p1.x, y: p1.y },
@@ -88,41 +98,19 @@ export default class Creature extends GameObject {
             // Per-line fountain-pen intensity. 0 = pure crisp line; 1 = default;
             // 2 = exaggerated. Set independently per line via the editor.
             penEffect: 1.0,
+            // Per-line path wobble. Inherits from the creature's deformation
+            // (the "amount of pen wobble" baseline) so a freshly drawn line
+            // matches its surroundings; the editor can adjust it independently.
+            jitter: this.__deformation,
+            // Number of segments the line is split into (frequency of wobble).
+            segments: DEFAULT_SEGMENTS,
+            // When true, segment widths are randomized rather than equal.
+            randomSegmentLengths: false,
             smudgePrev: smudge,
             smudgeNext: smudge,
         };
         this.__lines.push(line);
         return line;
-    }
-
-    // Per-line random profile for fountain-pen rendering. Re-roll on reroll().
-    _generateSmudgeVariance() {
-        const rand = (min, max) => min + Math.random() * (max - min);
-        return {
-            taperLenFactor: rand(0.55, 1.4),
-            taperWidthFactor: rand(0.85, 1.25),
-            // -0.45..0.45: asymmetric widening of the taper across the line axis.
-            // Positive shifts widening toward +perp side; negative the opposite.
-            taperSideBias: rand(-0.45, 0.45),
-            // Blob at p2
-            blobSizeFactor: rand(0.6, 1.1),
-            blobOffsetPerp: rand(-0.4, 0.4),       // in strokeWeight units
-            blobStretch: rand(0.85, 1.25),         // along-line stretch
-            blobRotation: rand(-Math.PI / 5, Math.PI / 5),
-            // Smaller touch at p1
-            p1TouchFactor: rand(0.6, 1.1),
-            p1TouchOffsetPerp: rand(-0.35, 0.35),
-            // Halo at p2
-            haloFactor: rand(0.8, 1.25),
-            haloOffsetPerp: rand(-0.35, 0.35),
-            // Subtle stroke-weight noise along the line — one value per segment.
-            // Each in [-1, 1]; amplitude is scaled by penEffect at render time.
-            strokeNoise: Array.from({ length: 6 }, () => rand(-1, 1)),
-            // Perpendicular wobble at each interior segment boundary (5 = 6
-            // segments minus 1). Each in [-1, 1]; amplitude is scaled by
-            // jitter at half the body's BODY_JITTER amount at render time.
-            pathJitter: Array.from({ length: 5 }, () => rand(-1, 1)),
-        };
     }
 
     removeLine(line) {
@@ -238,7 +226,7 @@ export default class Creature extends GameObject {
         this.__bodyState = this._generateBodyState();
         for (const ln of this.__lines) {
             ln.smudgePrev = ln.smudgeNext;
-            ln.smudgeNext = this._generateSmudgeVariance();
+            ln.smudgeNext = generateSmudgeVariance();
         }
         // Arms snap with the cycle (no prev/next interpolation for ticks).
         this.__arms = this.__armSpecs.map((arm) => this._materializeArm(arm));
@@ -254,12 +242,6 @@ export default class Creature extends GameObject {
         return Math.min(Math.max(elapsed / interval, 0), 1);
     }
 
-    _lerp(a, b, t) { return a + (b - a) * t; }
-    _lerpArr(a, b, t) {
-        const out = new Array(a.length);
-        for (let i = 0; i < a.length; i++) out[i] = a[i] + (b[i] - a[i]) * t;
-        return out;
-    }
     _lerpVerts(a, b, t) {
         const out = new Array(a.length);
         for (let i = 0; i < a.length; i++) {
@@ -267,23 +249,10 @@ export default class Creature extends GameObject {
         }
         return out;
     }
-    _lerpSmudge(a, b, t) {
-        if (a === b) return a;
-        return {
-            taperLenFactor:     this._lerp(a.taperLenFactor,     b.taperLenFactor,     t),
-            taperWidthFactor:   this._lerp(a.taperWidthFactor,   b.taperWidthFactor,   t),
-            taperSideBias:      this._lerp(a.taperSideBias,      b.taperSideBias,      t),
-            blobSizeFactor:     this._lerp(a.blobSizeFactor,     b.blobSizeFactor,     t),
-            blobOffsetPerp:     this._lerp(a.blobOffsetPerp,     b.blobOffsetPerp,     t),
-            blobStretch:        this._lerp(a.blobStretch,        b.blobStretch,        t),
-            blobRotation:       this._lerp(a.blobRotation,       b.blobRotation,       t),
-            p1TouchFactor:      this._lerp(a.p1TouchFactor,      b.p1TouchFactor,      t),
-            p1TouchOffsetPerp:  this._lerp(a.p1TouchOffsetPerp,  b.p1TouchOffsetPerp,  t),
-            haloFactor:         this._lerp(a.haloFactor,         b.haloFactor,         t),
-            haloOffsetPerp:     this._lerp(a.haloOffsetPerp,     b.haloOffsetPerp,     t),
-            strokeNoise:        this._lerpArr(a.strokeNoise, b.strokeNoise, t),
-            pathJitter:         this._lerpArr(a.pathJitter,  b.pathJitter,  t),
-        };
+    _lerpArr(a, b, t) {
+        const out = new Array(a.length);
+        for (let i = 0; i < a.length; i++) out[i] = a[i] + (b[i] - a[i]) * t;
+        return out;
     }
 
     _materializeArm(arm) {
@@ -309,12 +278,32 @@ export default class Creature extends GameObject {
     }
 
     _materializeBody(r) {
+        const d = this.__deformation;
         const j = this.__jitter;
         const count = 16;
         const verts = [];
+        // Smooth deformation: sum of low harmonics with random phases. 1st
+        // harmonic gives ovality, 2nd a gentle pinch, 3rd a 3-lobe lean.
+        // Amplitude scales with radius so larger creatures deform
+        // proportionally. This is the "confident pen stroke" look.
+        const amp = d * r * 0.08;
+        const a1 = amp * (0.7 + Math.random() * 0.6);
+        const a2 = amp * (0.3 + Math.random() * 0.3);
+        const a3 = amp * (0.1 + Math.random() * 0.2);
+        const phi1 = Math.random() * 2 * Math.PI;
+        const phi2 = Math.random() * 2 * Math.PI;
+        const phi3 = Math.random() * 2 * Math.PI;
+        // Per-vertex random jitter layered on top — twitchy bumps. Used by
+        // the animation pipeline to make food-activation visible. At j=0
+        // this contributes nothing.
+        const vertexAmp = j * VERTEX_JITTER_SCALE;
         for (let i = 0; i < count; i++) {
             const a = (i * 2 * Math.PI) / count;
-            const rr = r + (Math.random() - 0.5) * BODY_JITTER * j;
+            const harmonic = a1 * Math.sin(a + phi1)
+                           + a2 * Math.sin(2 * a + phi2)
+                           + a3 * Math.sin(3 * a + phi3);
+            const bump = (Math.random() - 0.5) * vertexAmp;
+            const rr = r + harmonic + bump;
             verts.push({ x: Math.cos(a) * rr, y: Math.sin(a) * rr });
         }
         return verts;
@@ -340,7 +329,14 @@ export default class Creature extends GameObject {
     // Outer ring — legal region for new lines. Clicks here don't deselect.
     get outerRingRadius() { return this.__bodyRadius * 10; }
 
-    // Editor hooks — jitter is a scalar; setting it re-bakes.
+    // Editor hooks — both deformation and jitter are scalars; setting either
+    // re-bakes so slider tweaks are visible immediately.
+    get deformation() { return this.__deformation; }
+    set deformation(v) {
+        this.__deformation = v;
+        this._bake();
+    }
+
     get jitter() { return this.__jitter; }
     set jitter(v) {
         this.__jitter = v;
@@ -362,13 +358,23 @@ export default class Creature extends GameObject {
     get smoothJitter() { return this.__smoothJitter; }
     set smoothJitter(v) { this.__smoothJitter = v; }
 
+    // Update jitter/interval/smooth without rebaking the body or resetting the
+    // animation clock — used by per-frame drivers (e.g. food activation) that
+    // would otherwise wipe out the smooth-interpolation cycle by triggering a
+    // fresh _bake() on every value change.
+    applyJitterAnimation(jitter, interval, smooth) {
+        this.__jitter = jitter;
+        this.__jitterAnimateInterval = interval;
+        this.__smoothJitter = smooth;
+    }
+
     // Snap to a brand-new state for body, arms, and all line smudges. Resets
     // the phase to 0 — useful as "force immediate randomize" while animation
     // is on (drift starts from the new state).
     reroll() {
         this._bake();
         for (const ln of this.__lines) {
-            const newSmudge = this._generateSmudgeVariance();
+            const newSmudge = generateSmudgeVariance();
             ln.smudgePrev = newSmudge;
             ln.smudgeNext = newSmudge;
         }
@@ -445,143 +451,13 @@ export default class Creature extends GameObject {
         for (const ln of this.__lines) {
             const smudge = (phase === 1 || ln.smudgePrev === ln.smudgeNext)
                 ? ln.smudgeNext
-                : this._lerpSmudge(ln.smudgePrev, ln.smudgeNext, phase);
-            this._renderFountainPenLine(p, ln, smudge, ln === this.__selectedLine);
-        }
-    }
-
-    /*
-     * Fountain-pen rendering for a single line.
-     *
-     * Layers (back to front):
-     *   1. Selection underlay (only if selected)
-     *   2. Bleed halos at both endpoints (stronger at p2)
-     *   3. Base line stroke
-     *   4. Tapered widening along the last ~40% approaching p2
-     *      — gives the "line widens as it approaches the point" feel
-     *   5. Pooled ink blob at p2 (lift point) and smaller touch at p1
-     *   6. Selection endpoint dots (only if selected)
-     */
-    _renderFountainPenLine(p, ln, smudge, isSelected) {
-        if (ln.penEffect == null) ln.penEffect = 1.0;                // safety net
-        const sm = smudge;
-        const sw = ln.strokeWeight;
-        // Halved internally so slider 1.00 → 0.5 of the prior effect.
-        const pe = ln.penEffect * 0.5;
-        const r = p.red(this.__strokeColor);
-        const g = p.green(this.__strokeColor);
-        const b = p.blue(this.__strokeColor);
-
-        // Direction + perpendicular for the line
-        const dx = ln.p2.x - ln.p1.x;
-        const dy = ln.p2.y - ln.p1.y;
-        const len = Math.sqrt(dx * dx + dy * dy);
-        let ux = 0, uy = 0, perpX = 0, perpY = 0;
-        if (len > 0.001) {
-            ux = dx / len; uy = dy / len;
-            perpX = -uy;   perpY = ux;
-        }
-
-        // 1. Selection underlay
-        if (isSelected) {
-            p.noFill();
-            p.stroke(60, 130, 200, 90);
-            p.strokeWeight(sw + 6);
-            p.line(ln.p1.x, ln.p1.y, ln.p2.x, ln.p2.y);
-        }
-
-        // 2. Bleed halos — slightly offset to one side. Scaled by pen effect.
-        if (pe > 0.01) {
-            const haloOX = perpX * sm.haloOffsetPerp * sw * pe;
-            const haloOY = perpY * sm.haloOffsetPerp * sw * pe;
-            p.noStroke();
-            p.fill(r, g, b, 28);
-            p.circle(ln.p2.x + haloOX, ln.p2.y + haloOY, sw * 4.2 * sm.haloFactor * pe);
-            p.fill(r, g, b, 55);
-            p.circle(ln.p2.x + haloOX * 0.5, ln.p2.y + haloOY * 0.5, sw * 2.6 * sm.haloFactor * pe);
-            p.fill(r, g, b, 22);
-            p.circle(ln.p1.x, ln.p1.y, sw * 2.4 * pe);
-        }
-
-        // 3. Base line — segmented, with per-segment strokeWeight noise (from
-        // penEffect) and perpendicular path jitter at interior boundaries
-        // (from creature.jitter, halved relative to the body). Endpoints stay
-        // anchored at p1/p2; only intermediate vertices wobble. Round caps
-        // hide the segment joins.
-        p.noFill();
-        p.stroke(this.__strokeColor);
-        const noise = sm.strokeNoise;
-        const segCount = noise.length;
-        const noiseAmount = 0.10 * pe;
-        const pathJitter = sm.pathJitter || [];
-        const jitterAmount = 0.1 * this.__jitter * BODY_JITTER;
-        let prevX = ln.p1.x, prevY = ln.p1.y;
-        for (let i = 0; i < segCount; i++) {
-            let nextX, nextY;
-            if (i === segCount - 1) {
-                nextX = ln.p2.x;
-                nextY = ln.p2.y;
-            } else {
-                const t = (i + 1) / segCount;
-                const baseX = ln.p1.x + dx * t;
-                const baseY = ln.p1.y + dy * t;
-                const off = (pathJitter[i] || 0) * jitterAmount;
-                nextX = baseX + perpX * off;
-                nextY = baseY + perpY * off;
-            }
-            p.strokeWeight(sw * (1 + noise[i] * noiseAmount));
-            p.line(prevX, prevY, nextX, nextY);
-            prevX = nextX;
-            prevY = nextY;
-        }
-
-        // 4. Asymmetric tapered approach toward p2. All widths scaled by pen
-        // effect — at pe=0 the polygon collapses to zero, at pe=1 it widens to
-        // the default, at pe=2 it's dramatic.
-        if (pe > 0.01 && len > sw * 2) {
-            const taperLen = Math.min(len * 0.4 * sm.taperLenFactor, sw * 8 * sm.taperLenFactor);
-            const totalW = sw * 1.7 * sm.taperWidthFactor * pe;
-            const wEndA = totalW * (0.5 + sm.taperSideBias);
-            const wEndB = totalW * (0.5 - sm.taperSideBias);
-            const wBackA = sw * 1.0 * pe * (0.5 + sm.taperSideBias * 0.4);
-            const wBackB = sw * 1.0 * pe * (0.5 - sm.taperSideBias * 0.4);
-            const tBackX = ln.p2.x - ux * taperLen;
-            const tBackY = ln.p2.y - uy * taperLen;
-
-            p.noStroke();
-            p.fill(this.__strokeColor);
-            p.beginShape();
-            p.vertex(tBackX + perpX * wBackA, tBackY + perpY * wBackA);
-            p.vertex(tBackX - perpX * wBackB, tBackY - perpY * wBackB);
-            p.vertex(ln.p2.x - perpX * wEndB, ln.p2.y - perpY * wEndB);
-            p.vertex(ln.p2.x + perpX * wEndA, ln.p2.y + perpY * wEndA);
-            p.endShape(p.CLOSE);
-        }
-
-        // 5. Asymmetric pooled blob at p2 and small touch at p1, scaled by pe.
-        if (pe > 0.01) {
-            p.noStroke();
-            p.fill(this.__strokeColor);
-            const blobR = sw * 1.0 * sm.blobSizeFactor * pe;
-            const blobX = ln.p2.x + perpX * sm.blobOffsetPerp * sw * pe;
-            const blobY = ln.p2.y + perpY * sm.blobOffsetPerp * sw * pe;
-            const lineAngle = Math.atan2(uy, ux);
-            p.push();
-            p.translate(blobX, blobY);
-            p.rotate(lineAngle + sm.blobRotation);
-            p.ellipse(0, 0, blobR * 2 * sm.blobStretch, blobR * 2);
-            p.pop();
-
-            const p1OX = perpX * sm.p1TouchOffsetPerp * sw * pe;
-            const p1OY = perpY * sm.p1TouchOffsetPerp * sw * pe;
-            p.circle(ln.p1.x + p1OX, ln.p1.y + p1OY, sw * 0.85 * sm.p1TouchFactor * pe);
-        }
-
-        // 6. Selection endpoint dots
-        if (isSelected) {
-            p.fill(60, 130, 200, 230);
-            p.circle(ln.p1.x, ln.p1.y, 6);
-            p.circle(ln.p2.x, ln.p2.y, 6);
+                : lerpSmudge(ln.smudgePrev, ln.smudgeNext, phase);
+            renderFountainPenLine(
+                p, ln, smudge, this.__strokeColor,
+                ln.jitter ?? this.__deformation,
+                ln === this.__selectedLine,
+                this.__bodyRadius * 6,
+            );
         }
     }
 
@@ -664,7 +540,8 @@ export default class Creature extends GameObject {
         // along the perimeter. Round caps hide the segment joins.
         p.noFill();
         p.stroke(this.__strokeColor);
-        const noiseAmount = 0.10 * pe; // ±10% at pe=1, ±20% at pe=2, 0 at pe=0
+        const noiseAmount = 0.30 * pe; // ±15% at slider 1, ±30% at slider 2 —
+                                       // visibly uneven stroke for fountain-pen feel
         for (let i = 0; i < n; i++) {
             const v0 = verts[(i - 1 + n) % n];
             const v1 = verts[i];

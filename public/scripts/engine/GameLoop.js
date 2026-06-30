@@ -61,13 +61,6 @@ export default class GameLoop extends Manager {
         for (const entry of this.__renderSystems) {
             entry.system.render();
         }
-
-        // Border rect that moves with screen shake to make the effect visible
-        let p = this.gameSession.p5;
-        p.noFill();
-        p.stroke(255);
-        p.strokeWeight(3);
-        p.rect(0, 0, this.gameSession.canvasWidth, this.gameSession.canvasHeight);
     }
 
     keyIsDown(){

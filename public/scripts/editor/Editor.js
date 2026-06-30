@@ -56,6 +56,11 @@ export default class Editor {
             </label>
 
             <label class="slider">
+                <span class="row"><span>deformation</span><span class="val" data-val="deformation">${c.deformation.toFixed(2)}</span></span>
+                <input type="range" min="0" max="3" step="0.05" value="${c.deformation}" data-ctrl="deformation">
+            </label>
+
+            <label class="slider">
                 <span class="row"><span>jitter</span><span class="val" data-val="jitter">${c.jitter.toFixed(2)}</span></span>
                 <input type="range" min="0" max="3" step="0.05" value="${c.jitter}" data-ctrl="jitter">
             </label>
@@ -96,6 +101,9 @@ export default class Editor {
 
     _lineControlsHtml(ln) {
         const pe = ln.penEffect ?? 1.0;
+        const jt = ln.jitter ?? 0;
+        const seg = ln.segments ?? 6;
+        const randSeg = !!ln.randomSegmentLengths;
         return `
             <h3>line</h3>
             <label class="slider">
@@ -105,6 +113,18 @@ export default class Editor {
             <label class="slider">
                 <span class="row"><span>pen effect</span><span class="val" data-val="line-pen">${pe.toFixed(2)}</span></span>
                 <input type="range" min="0" max="2" step="0.05" value="${pe}" data-ctrl="line-pen">
+            </label>
+            <label class="slider">
+                <span class="row"><span>jitter amplitude</span><span class="val" data-val="line-jitter">${jt.toFixed(2)}</span></span>
+                <input type="range" min="0" max="10" step="0.1" value="${jt}" data-ctrl="line-jitter">
+            </label>
+            <label class="slider">
+                <span class="row"><span>jitter frequency</span><span class="val" data-val="line-segments">${seg}</span></span>
+                <input type="range" min="4" max="12" step="1" value="${seg}" data-ctrl="line-segments">
+            </label>
+            <label class="checkbox">
+                <input type="checkbox" data-ctrl="line-random-seg" ${randSeg ? 'checked' : ''}>
+                random segment length
             </label>
             <button data-ctrl="line-delete" class="danger">delete line</button>
         `;
@@ -124,6 +144,12 @@ export default class Editor {
             const v = parseFloat(e.target.value);
             c.bodyRadius = v;
             $('[data-val="body"]').textContent = v.toFixed(0);
+        });
+
+        $('[data-ctrl="deformation"]').addEventListener('input', (e) => {
+            const v = parseFloat(e.target.value);
+            c.deformation = v;
+            $('[data-val="deformation"]').textContent = v.toFixed(2);
         });
 
         $('[data-ctrl="jitter"]').addEventListener('input', (e) => {
@@ -175,6 +201,22 @@ export default class Editor {
             const v = parseFloat(e.target.value);
             ln.penEffect = v;
             $('[data-val="line-pen"]').textContent = v.toFixed(2);
+        });
+
+        $('[data-ctrl="line-jitter"]').addEventListener('input', (e) => {
+            const v = parseFloat(e.target.value);
+            ln.jitter = v;
+            $('[data-val="line-jitter"]').textContent = v.toFixed(2);
+        });
+
+        $('[data-ctrl="line-segments"]').addEventListener('input', (e) => {
+            const v = parseInt(e.target.value, 10);
+            ln.segments = v;
+            $('[data-val="line-segments"]').textContent = String(v);
+        });
+
+        $('[data-ctrl="line-random-seg"]').addEventListener('change', (e) => {
+            ln.randomSegmentLengths = e.target.checked;
         });
 
         $('[data-ctrl="line-delete"]').addEventListener('click', () => {

@@ -152,15 +152,24 @@ export default class VectorParticleEffect {
 
         let particle = new VectorParticle(this.gameSession, shape,lifeSpan,size, positionVec,rotationSpeed,velocity, 1, fill, true, particleVertices, gravity);
 
-        // Apply hue-based color: per-system hue first, then global silly particle hue as override
-        let hue = this.effectParameters.vectorParticle.hue;
+        // Color resolution priority:
+        //   1. Per-system `color` (any CSS/hex string) — wins if defined.
+        //   2. Per-system `hue` (legacy 0–360), with sillyColors override.
+        //   3. Particle's default white.
+        const colorHex = this.effectParameters.vectorParticle.color;
         const sillyColors = this.gameSession.juiceSettings.container.sillyColors;
-        if (sillyColors.active && sillyColors.particleHue > 0) hue = sillyColors.particleHue;
-        const rgb = HelperFunctions.HueToRGB(hue);
-        if (rgb) {
-            const col = this.gameSession.p5.color(rgb[0], rgb[1], rgb[2]);
-            particle.fillColor = col;
-            particle.strokeColor = col;
+        let colorObj = null;
+        if (colorHex) {
+            colorObj = this.gameSession.p5.color(colorHex);
+        } else {
+            let hue = this.effectParameters.vectorParticle.hue;
+            if (sillyColors.active && sillyColors.particleHue > 0) hue = sillyColors.particleHue;
+            const rgb = HelperFunctions.HueToRGB(hue);
+            if (rgb) colorObj = this.gameSession.p5.color(rgb[0], rgb[1], rgb[2]);
+        }
+        if (colorObj) {
+            particle.fillColor = colorObj;
+            particle.strokeColor = colorObj;
         }
 
         return particle;
